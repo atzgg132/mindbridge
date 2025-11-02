@@ -1,0 +1,136 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "go run github.com/steebchen/prisma-client-go"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  MODERATOR
+}
+
+enum ScreeningLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum CircleCategory {
+  CRISIS
+  ANXIETY_DEPRESSION
+  ACADEMIC_STRESS
+  SOCIAL_ADJUSTMENT
+  GENERAL_SUPPORT
+}
+
+enum CircleStatus {
+  ACTIVE
+  FULL
+  ARCHIVED
+}
+
+model User {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  fullName            String
+  phoneNumber         String
+  password            String
+  profilePicture      String?
+  role                UserRole             @default(USER)
+  onboardingCompleted Boolean              @default(false)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  onboardingResponse  OnboardingResponse?
+  circleMemberships   CircleMembership[]
+  moderatedCircles    Circle[]             @relation("CircleModerator")
+  messages            Message[]
+  messageReads        MessageRead[]
+
+  @@map("users")
+}
+
+model OnboardingResponse {
+  id                  String         @id @default(uuid())
+  userId              String         @unique
+  user                User           @relation(fields: [userId], references: [id])
+  topics              String[]
+  otherTopic          String?
+  participationStyle  String
+  availability        String
+  littleInterest      Int
+  feelingDown         Int
+  feelingNervous      Int
+  worrying            Int
+  phq2Total           Int
+  gad2Total           Int
+  screeningResult     ScreeningLevel
+  consentVersion      String
+  consentAcceptedAt   DateTime
+  contactOk           Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@map("onboarding_responses")
+}
+
+model Circle {
+  id             String             @id @default(uuid())
+  name           String
+  category       CircleCategory
+  status         CircleStatus       @default(ACTIVE)
+  moderatorId    String
+  moderator      User               @relation("CircleModerator", fields: [moderatorId], references: [id])
+  maxMembers     Int                @default(6)
+  memberships    CircleMembership[]
+  messages       Message[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@map("circles")
+}
+
+model CircleMembership {
+  id        String   @id @default(uuid())
+  circleId  String
+  circle    Circle   @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([circleId, userId])
+  @@map("circle_memberships")
+}
+
+model Message {
+  id           String        @id @default(uuid())
+  circleId     String
+  circle       Circle        @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  senderId     String
+  sender       User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content      String
+  imageUrl     String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  readReceipts MessageRead[]
+
+  @@map("messages")
+}
+
+model MessageRead {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt    DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@map("message_reads")
+}

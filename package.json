@@ -1,0 +1,21 @@
+{
+  "name": "mindbridge",
+  "version": "0.0.1",
+  "private": true,
+  "description": "MindBridge - Peer Support Web Application",
+  "scripts": {
+    "dev": "concurrently \"cd backend && go run main.go\" \"cd frontend && pnpm dev\"",
+    "dev:frontend": "cd frontend && pnpm dev",
+    "dev:backend": "cd backend && go run main.go",
+    "build:frontend": "cd frontend && pnpm build",
+    "db:studio": "cd backend && go run github.com/steebchen/prisma-client-go studio",
+    "db:push": "cd backend && go run github.com/steebchen/prisma-client-go db push",
+    "db:generate": "cd backend && go run github.com/steebchen/prisma-client-go generate",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
