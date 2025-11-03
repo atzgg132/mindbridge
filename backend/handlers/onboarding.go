@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"mindbridge/backend/prisma/db"
 	"mindbridge/backend/services"
+	"mindbridge/backend/utils"
 )
 
 type OnboardingHandler struct {
@@ -295,6 +296,16 @@ func (h *OnboardingHandler) SubmitOnboarding(c *gin.Context) {
 		responseOtherTopic = otherTopic
 	}
 
+	// Generate new JWT token with onboarding_completed: true
+	emailValue, _ := c.Get("email")
+	roleValue, _ := c.Get("role")
+	newToken, err := utils.GenerateJWT(userID, emailValue.(string), roleValue.(string), true)
+	if err != nil {
+		log.Printf("Failed to generate new JWT for user %s: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate authentication token"})
+		return
+	}
+
 	payload := OnboardingResponsePayload{
 		Topics:             topics,
 		OtherTopic:         responseOtherTopic,
@@ -315,7 +326,8 @@ func (h *OnboardingHandler) SubmitOnboarding(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data": payload,
+		"data":  payload,
+		"token": newToken,
 	})
 }
 

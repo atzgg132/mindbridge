@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAuthStore } from '../store/authStore'
 import { useNavigate } from 'react-router-dom'
 import Avatar from '../components/Avatar'
-import { io, Socket } from 'socket.io-client'
+import io from 'socket.io-client'
 import api from '../lib/api'
 
 type ChatView = 'circle' | 'instant-help'
@@ -35,9 +35,18 @@ interface CircleInfo {
   status: string
 }
 
+interface OutgoingMessagePayload {
+  circleId: string
+  content: string
+  imageUrl?: string
+  timestamp: number
+}
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 export default function Dashboard() {
+  console.log('🎯 Dashboard component rendering')
+
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const [activeView, setActiveView] = useState<ChatView>('circle')
@@ -49,22 +58,33 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
   const [hasNoCircle, setHasNoCircle] = useState(false)
+  const [isSocketReady, setIsSocketReady] = useState(false)
 
-  const socketRef = useRef<Socket | null>(null)
+  const socketRef = useRef<any>(null)
+  const pendingMessagesRef = useRef<OutgoingMessagePayload[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  console.log('📊 Current state:', { user, circleInfo, hasNoCircle, isLoading })
+
   useEffect(() => {
+    console.log('🔄 useEffect running')
     const token = localStorage.getItem('auth_token')
+    console.log('🔑 Token exists:', !!token)
+    console.log('👤 User exists:', !!user)
+
     if (!token || !user) {
+      console.log('❌ No token or user, redirecting to signin')
       navigate('/signin')
       return
     }
 
     // Fetch circle info
     const fetchCircleInfo = async () => {
+      console.log('🔍 Fetching circle info...')
       try {
         const response = await api.get('/messages/my-circle')
+        console.log('✅ Circle info received:', response.data)
         setCircleInfo(response.data)
         setHasNoCircle(false)
 
@@ -72,12 +92,13 @@ export default function Dashboard() {
         await fetchMessagesAndMembers(response.data.circleId)
 
         // Initialize Socket.io
+        console.log('🔌 Initializing socket for circle:', response.data.circleId)
         initializeSocket(response.data.circleId)
       } catch (error: any) {
         if (error.response?.status === 404) {
-          console.log('No circle found for user yet')
+          console.log('⚠️ No circle found for user yet')
         } else {
-          console.error('Error fetching circle:', error.response?.status || error.message)
+          console.error('❌ Error fetching circle:', error.response?.status || error.message)
         }
         setHasNoCircle(true)
       } finally {
@@ -88,12 +109,33 @@ export default function Dashboard() {
     fetchCircleInfo()
 
     return () => {
+      console.log('🧹 Cleanup: disconnecting socket')
       if (socketRef.current) {
+        socketRef.current.removeAllListeners?.()
         socketRef.current.disconnect()
       }
+      setIsSocketReady(false)
+      pendingMessagesRef.current = []
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const flushPendingMessages = () => {
+    if (!socketRef.current) {
+      return
+    }
+
+    const queued = pendingMessagesRef.current
+    if (!queued.length) {
+      return
+    }
+
+    console.log(`📨 Flushing ${queued.length} queued message(s)`)
+    queued.forEach((payload) => {
+      socketRef.current.emit('send_message', JSON.stringify(payload))
+    })
+    pendingMessagesRef.current = []
+  }
 
   const fetchMessagesAndMembers = async (circleId: string) => {
     try {
@@ -120,37 +162,61 @@ export default function Dashboard() {
   }
 
   const initializeSocket = (circleId: string) => {
+    console.log('⚡ initializeSocket called with circleId:', circleId)
     const token = localStorage.getItem('auth_token')
+    console.log('🔑 Token for socket:', token ? 'exists' : 'missing')
+    console.log('🌐 API_URL:', API_URL)
+
+    if (socketRef.current) {
+      console.log('♻️ Existing socket found, disconnecting before reinitializing')
+      socketRef.current.removeAllListeners?.()
+      socketRef.current.disconnect()
+      setIsSocketReady(false)
+    }
+
+    console.log('🔌 Creating socket instance...')
     const socket = io(API_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       withCredentials: true,
-      query: token
-        ? { token }
-        : undefined,
     })
 
+    console.log('📡 Socket instance created, setting up listeners...')
+    setIsSocketReady(false)
+
     socket.on('connect', () => {
-      console.log('Socket connected:', socket.id)
+      console.log('✅ Socket connected with ID:', socket.id)
+      setIsSocketReady(false)
       // Authenticate
       if (token) {
+        console.log('🔐 Sending authenticate event with token...')
         socket.emit('authenticate', token)
+      } else {
+        console.log('❌ No token available for authentication')
       }
     })
 
     socket.on('auth_success', (data) => {
-      console.log('Authentication successful:', data)
+      console.log('🎉 Authentication successful! Data:', data)
+      setIsSocketReady(true)
+      flushPendingMessages()
     })
 
     socket.on('auth_error', (error) => {
-      console.error('Authentication failed:', error)
+      console.error('❌ Authentication failed:', error)
+      setIsSocketReady(false)
     })
 
     socket.on('message_error', (error) => {
-      console.error('Message error:', error)
+      console.error('❌ Message error:', error)
+    })
+
+    socket.on('connect_error', (error) => {
+      console.error('❌ Connection error:', error)
+      setIsSocketReady(false)
     })
 
     socket.on('new_message', (message: Message) => {
-      console.log('New message received:', message)
+      console.log('📨 New message received:', message)
       setMessages((prev) => [...prev, message])
 
       // Mark as read if not from current user
@@ -163,7 +229,7 @@ export default function Dashboard() {
     })
 
     socket.on('message_read', (data: { messageId: string; userId: string; readBy: string[] }) => {
-      console.log('Message read update:', data)
+      console.log('👁️ Message read update:', data)
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === data.messageId ? { ...msg, readBy: data.readBy } : msg
@@ -172,14 +238,17 @@ export default function Dashboard() {
     })
 
     socket.on('disconnect', () => {
-      console.log('Socket disconnected')
+      console.log('🔴 Socket disconnected')
+      setIsSocketReady(false)
     })
 
+    console.log('💾 Storing socket in ref')
     socketRef.current = socket
+    console.log('✅ Socket setup complete!')
   }
 
   const markMessageAsRead = (messageId: string, circleId: string) => {
-    if (socketRef.current) {
+    if (socketRef.current && isSocketReady) {
       socketRef.current.emit('mark_read', JSON.stringify({
         messageId,
         circleId,
@@ -188,21 +257,52 @@ export default function Dashboard() {
   }
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !circleInfo || !socketRef.current) return
+    console.log('🚀 handleSendMessage called')
+    console.log('📝 messageInput:', messageInput)
+    console.log('🔵 circleInfo:', circleInfo)
+    console.log('🔌 socketRef.current:', socketRef.current)
+    console.log('✅ Socket authenticated:', isSocketReady)
 
-    const payload = {
+    if (!messageInput.trim()) {
+      console.log('❌ Message input is empty')
+      return
+    }
+
+    if (!circleInfo) {
+      console.log('❌ Circle info is null')
+      return
+    }
+
+    const payload: OutgoingMessagePayload = {
       circleId: circleInfo.circleId,
       content: messageInput.trim(),
       imageUrl: '',
       timestamp: Date.now(),
     }
 
+    if (!socketRef.current) {
+      console.log('⚠️ Socket missing, queueing message and re-initializing')
+      pendingMessagesRef.current.push(payload)
+      initializeSocket(circleInfo.circleId)
+      setMessageInput('')
+      return
+    }
+
+    if (!isSocketReady) {
+      console.log('⏳ Socket not authenticated yet, queueing message')
+      pendingMessagesRef.current.push(payload)
+      setMessageInput('')
+      return
+    }
+
+    console.log('📤 Sending message:', payload)
     socketRef.current.emit('send_message', JSON.stringify(payload))
+    console.log('✅ Message emitted')
     setMessageInput('')
   }
 
   const handleImageUpload = async (file: File) => {
-    if (!file || !circleInfo || !socketRef.current) return
+    if (!file || !circleInfo) return
 
     setIsUploading(true)
 
@@ -224,7 +324,16 @@ export default function Dashboard() {
         timestamp: Date.now(),
       }
 
-      socketRef.current.emit('send_message', JSON.stringify(payload))
+      if (!socketRef.current) {
+        console.log('⚠️ Socket missing during image upload, queueing message and re-initializing')
+        pendingMessagesRef.current.push(payload)
+        initializeSocket(circleInfo.circleId)
+      } else if (!isSocketReady) {
+        console.log('⏳ Socket not authenticated yet, queueing image message')
+        pendingMessagesRef.current.push(payload)
+      } else {
+        socketRef.current.emit('send_message', JSON.stringify(payload))
+      }
       setMessageInput('')
     } catch (error) {
       console.error('Image upload error:', error)

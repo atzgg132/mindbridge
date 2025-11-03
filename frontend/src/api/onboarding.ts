@@ -7,8 +7,11 @@ export const onboardingApi = {
     return response.data.data ?? null
   },
 
-  async submit(payload: OnboardingSubmission): Promise<OnboardingData> {
-    const response = await api.post<ApiResponse<OnboardingData>>('/onboarding', payload)
-    return response.data.data
+  async submit(payload: OnboardingSubmission): Promise<{ data: OnboardingData; token?: string }> {
+    const response = await api.post<ApiResponse<OnboardingData> & { token?: string }>('/onboarding', payload)
+    return {
+      data: response.data.data,
+      token: response.data.token
+    }
   },
 }

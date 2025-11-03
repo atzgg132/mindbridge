@@ -330,9 +330,15 @@ export default function Onboarding() {
     setSubmitError('')
     setIsSubmitting(true)
     try {
-      const result = await onboardingApi.submit(submission)
-      setServerResult(result)
-      setView(result.screeningResult === 'high' ? 'high' : 'success')
+      const { data, token } = await onboardingApi.submit(submission)
+
+      // Save the new token if provided
+      if (token) {
+        localStorage.setItem('auth_token', token)
+      }
+
+      setServerResult(data)
+      setView(data.screeningResult === 'high' ? 'high' : 'success')
       setJustCompleted(true)
       if (user) {
         setUser({ ...user, onboardingCompleted: true })

@@ -103,11 +103,10 @@ func (ss *SocketServer) setupHandlers() {
 
 	ss.server.OnEvent("/", "send_message", func(s socketio.Conn, data string) {
 		ctx := context.Background()
-		socketCtx := s.Context()
-
-		userID, ok := socketCtx.(map[string]interface{})["userID"].(string)
+		userID, ok := getUserIDFromConn(s)
 		if !ok {
 			log.Printf("Unauthorized message send attempt from socket %s", s.ID())
+			s.Emit("message_error", "Not authenticated")
 			return
 		}
 
@@ -115,6 +114,13 @@ func (ss *SocketServer) setupHandlers() {
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			log.Printf("Invalid message payload: %v", err)
 			s.Emit("message_error", "Invalid message format")
+			return
+		}
+
+		payload.Content = strings.TrimSpace(payload.Content)
+		if payload.CircleID == "" || payload.Content == "" {
+			log.Printf("Invalid message payload from user %s: missing circle or content", userID)
+			s.Emit("message_error", "Circle and message content are required")
 			return
 		}
 
@@ -132,6 +138,8 @@ func (ss *SocketServer) setupHandlers() {
 		}
 
 		log.Printf("User %s sending message to circle %s", userID, payload.CircleID)
+
+		ensureRoomMembership(s, payload.CircleID)
 
 		// Create message in database
 		message, err := ss.client.Message.CreateOne(
@@ -169,6 +177,18 @@ func (ss *SocketServer) setupHandlers() {
 			imageURL = &img
 		}
 
+
+		// Automatically mark message as read by the sender
+		_, err = ss.client.MessageRead.CreateOne(
+			db.MessageRead.Message.Link(db.Message.ID.Equals(message.ID)),
+			db.MessageRead.User.Link(db.User.ID.Equals(userID)),
+		).Exec(ctx)
+
+		if err != nil {
+			log.Printf("Failed to create read receipt for sender: %v", err)
+			// Continue anyway - this is not critical
+		}
+
 		// Prepare message response
 		response := MessageResponse{
 			ID:           message.ID,
@@ -179,7 +199,7 @@ func (ss *SocketServer) setupHandlers() {
 			Content:      message.Content,
 			ImageURL:     imageURL,
 			CreatedAt:    message.CreatedAt.Format(time.RFC3339),
-			ReadBy:       []string{}, // Initially empty
+			ReadBy:       []string{userID}, // Sender has read their own message
 		}
 
 		log.Printf("Message %s created by user %s in circle %s", message.ID, userID, payload.CircleID)
@@ -190,9 +210,7 @@ func (ss *SocketServer) setupHandlers() {
 
 	ss.server.OnEvent("/", "mark_read", func(s socketio.Conn, data string) {
 		ctx := context.Background()
-		socketCtx := s.Context()
-
-		userID, ok := socketCtx.(map[string]interface{})["userID"].(string)
+		userID, ok := getUserIDFromConn(s)
 		if !ok {
 			log.Printf("Unauthorized read receipt from socket %s", s.ID())
 			return
@@ -201,6 +219,11 @@ func (ss *SocketServer) setupHandlers() {
 		var payload ReadReceiptPayload
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			log.Printf("Invalid read receipt payload: %v", err)
+			return
+		}
+
+		if payload.CircleID == "" || payload.MessageID == "" {
+			log.Printf("Read receipt missing identifiers from user %s", userID)
 			return
 		}
 
@@ -432,6 +455,34 @@ func (ss *SocketServer) userHasCircleAccess(ctx context.Context, circleID, userI
 	}
 
 	return circle.ModeratorID == userID, nil
+}
+
+func getUserIDFromConn(s socketio.Conn) (string, bool) {
+	ctxMap, ok := s.Context().(map[string]interface{})
+	if !ok || ctxMap == nil {
+		return "", false
+	}
+
+	userID, ok := ctxMap["userID"].(string)
+	if !ok || userID == "" {
+		return "", false
+	}
+
+	return userID, true
+}
+
+func ensureRoomMembership(s socketio.Conn, circleID string) {
+	if circleID == "" {
+		return
+	}
+
+	for _, room := range s.Rooms() {
+		if room == circleID {
+			return
+		}
+	}
+
+	s.Join(circleID)
 }
 
 // Helper function to extract token from query params or headers
