@@ -46,6 +46,13 @@ func main() {
 	onboardingHandler := handlers.NewOnboardingHandler(client)
 	messageHandler := handlers.NewMessageHandler(client)
 
+	// Initialize instant help handler with Gemini API key
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	if geminiAPIKey == "" {
+		geminiAPIKey = "AIzaSyCvSp4AANR-zuGqCLR41RIGGpQPohMFdEs" // Fallback API key
+	}
+	instantHelpHandler := handlers.NewInstantHelpHandler(client, geminiAPIKey)
+
 	// Initialize WebSocket server
 	socketServer, err := websocket.NewSocketServer(client)
 	if err != nil {
@@ -111,6 +118,14 @@ func main() {
 			messages.GET("/circle/:circleId/members", messageHandler.GetCircleMembers)
 			messages.GET("/my-circle", messageHandler.GetUserCircle)
 			messages.POST("/upload", messageHandler.UploadImage)
+		}
+
+		// Instant Help routes (protected)
+		instantHelp := api.Group("/instant-help")
+		instantHelp.Use(middleware.AuthMiddleware())
+		{
+			instantHelp.POST("/chat", instantHelpHandler.Chat)
+			instantHelp.GET("/history", instantHelpHandler.GetHistory)
 		}
 
 		// Test endpoints

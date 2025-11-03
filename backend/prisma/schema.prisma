@@ -37,21 +37,22 @@ enum CircleStatus {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  email               String               @unique
+  id                  String                @id @default(uuid())
+  email               String                @unique
   fullName            String
   phoneNumber         String
   password            String
   profilePicture      String?
-  role                UserRole             @default(USER)
-  onboardingCompleted Boolean              @default(false)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  role                UserRole              @default(USER)
+  onboardingCompleted Boolean               @default(false)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
   onboardingResponse  OnboardingResponse?
   circleMemberships   CircleMembership[]
-  moderatedCircles    Circle[]             @relation("CircleModerator")
+  moderatedCircles    Circle[]              @relation("CircleModerator")
   messages            Message[]
   messageReads        MessageRead[]
+  instantHelpMessages InstantHelpMessage[]
 
   @@map("users")
 }
@@ -133,4 +134,15 @@ model MessageRead {
 
   @@unique([messageId, userId])
   @@map("message_reads")
+}
+
+model InstantHelpMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // "user" or "model"
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("instant_help_messages")
 }

@@ -59,6 +59,9 @@ export default function Dashboard() {
   const [isUploading, setIsUploading] = useState(false)
   const [hasNoCircle, setHasNoCircle] = useState(false)
   const [isSocketReady, setIsSocketReady] = useState(false)
+  const [instantHelpMessages, setInstantHelpMessages] = useState<Array<{ role: 'user' | 'model', text: string }>>([])
+  const [instantHelpInput, setInstantHelpInput] = useState('')
+  const [isAnchorTyping, setIsAnchorTyping] = useState(false)
 
   const socketRef = useRef<any>(null)
   const pendingMessagesRef = useRef<OutgoingMessagePayload[]>([])
@@ -119,6 +122,23 @@ export default function Dashboard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Fetch instant help history on mount
+  useEffect(() => {
+    const fetchInstantHelpHistory = async () => {
+      try {
+        const response = await api.get('/instant-help/history')
+        setInstantHelpMessages(response.data.history || [])
+      } catch (error) {
+        console.error('Failed to load instant help history:', error)
+        // Don't show error to user - they can just start fresh
+      }
+    }
+
+    if (user) {
+      fetchInstantHelpHistory()
+    }
+  }, [user])
 
   const flushPendingMessages = () => {
     if (!socketRef.current) {
@@ -353,6 +373,46 @@ export default function Dashboard() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSendMessage()
+    }
+  }
+
+  const handleSendInstantHelp = async () => {
+    if (!instantHelpInput.trim()) return
+
+    const userMessage = instantHelpInput.trim()
+
+    // Add user message to chat
+    setInstantHelpMessages(prev => [...prev, { role: 'user', text: userMessage }])
+    setInstantHelpInput('')
+    setIsAnchorTyping(true)
+
+    try {
+      const response = await api.post('/instant-help/chat', {
+        message: userMessage,
+        history: instantHelpMessages,
+      })
+
+      // Add Anchor's response
+      setInstantHelpMessages(prev => [...prev, { role: 'model', text: response.data.response }])
+    } catch (error) {
+      console.error('Instant help error:', error)
+      setInstantHelpMessages(prev => [
+        ...prev,
+        {
+          role: 'model',
+          text: "I'm having trouble connecting right now. Please try again in a moment, or reach out to your circle if you need immediate support."
+        }
+      ])
+    } finally {
+      setIsAnchorTyping(false)
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+    }
+  }
+
+  const handleInstantHelpKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendInstantHelp()
     }
   }
 
@@ -651,19 +711,113 @@ export default function Dashboard() {
           )}
 
           {activeView === 'instant-help' && (
-            <div className="flex flex-col items-center justify-center h-full text-center p-8">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center mb-4">
-                <svg className="h-10 w-10 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                24/7 Support Available
-              </h3>
-              <p className="text-sm text-slate-600 max-w-sm">
-                Start a conversation with our AI-powered assistant. Share what's on your mind, and get immediate support.
-              </p>
-            </div>
+            <>
+              {instantHelpMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center p-8">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center mb-4">
+                    <svg className="h-10 w-10 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">
+                    Chat with Anchor
+                  </h3>
+                  <p className="text-sm text-slate-600 max-w-sm mb-6">
+                    I'm here to listen and support you. Share what's on your mind, and I'll help you work through it with practical techniques and empathetic guidance.
+                  </p>
+                  <div className="bg-white/60 backdrop-blur-sm rounded-xl p-4 border border-slate-200/50 max-w-md text-left">
+                    <p className="text-xs font-semibold text-slate-700 mb-2">I can help with:</p>
+                    <ul className="text-xs text-slate-600 space-y-1">
+                      <li className="flex items-start gap-2">
+                        <span className="text-indigo-600">•</span>
+                        <span>Managing stress and anxiety</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-indigo-600">•</span>
+                        <span>Practicing mindfulness techniques</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-indigo-600">•</span>
+                        <span>Working through difficult feelings</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-indigo-600">•</span>
+                        <span>Finding coping strategies</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <AnimatePresence mode="popLayout">
+                  {instantHelpMessages.map((msg, index) => {
+                    const isUser = msg.role === 'user'
+                    return (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        transition={{ delay: index * 0.02 }}
+                        className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+                      >
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          isUser
+                            ? 'bg-gradient-to-br from-indigo-500 to-purple-500'
+                            : 'bg-gradient-to-br from-indigo-100 to-purple-100'
+                        }`}>
+                          {isUser ? (
+                            <span className="text-white text-sm font-semibold">
+                              {user?.fullName?.charAt(0) || 'U'}
+                            </span>
+                          ) : (
+                            <svg className="h-5 w-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                          )}
+                        </div>
+                        <div className={`flex flex-col gap-1 max-w-lg ${isUser ? 'items-end' : 'items-start'}`}>
+                          <span className="text-xs font-medium text-slate-700">
+                            {isUser ? 'You' : 'Anchor'}
+                          </span>
+                          <div
+                            className={`px-4 py-2.5 rounded-2xl ${
+                              isUser
+                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white'
+                                : 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                            }`}
+                          >
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )
+                  })}
+                  {isAnchorTyping && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex gap-3"
+                    >
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-indigo-100 to-purple-100">
+                        <svg className="h-5 w-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-slate-700">Anchor</span>
+                        <div className="px-4 py-2.5 rounded-2xl bg-white shadow-sm border border-slate-200">
+                          <div className="flex gap-1">
+                            <div className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                            <div className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                            <div className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              )}
+            </>
           )}
 
           <div ref={messagesEndRef} />
@@ -708,6 +862,38 @@ export default function Dashboard() {
               <button
                 onClick={handleSendMessage}
                 disabled={!messageInput.trim()}
+                className="p-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-lg"
+              >
+                <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-2 text-center">
+              Press Enter to send, Shift + Enter for new line
+            </p>
+          </div>
+        )}
+
+        {/* Instant Help Input */}
+        {activeView === 'instant-help' && (
+          <div className="bg-white/80 backdrop-blur-lg border-t border-slate-200/50 p-4">
+            <div className="flex items-end gap-3">
+              <div className="flex-1 relative">
+                <textarea
+                  value={instantHelpInput}
+                  onChange={(e) => setInstantHelpInput(e.target.value)}
+                  onKeyPress={handleInstantHelpKeyPress}
+                  placeholder="Share what's on your mind..."
+                  rows={1}
+                  disabled={isAnchorTyping}
+                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-none bg-white/50 backdrop-blur disabled:opacity-50"
+                  style={{ minHeight: '48px', maxHeight: '120px' }}
+                />
+              </div>
+              <button
+                onClick={handleSendInstantHelp}
+                disabled={!instantHelpInput.trim() || isAnchorTyping}
                 className="p-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-lg"
               >
                 <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
